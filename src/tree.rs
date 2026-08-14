@@ -76,9 +76,9 @@ impl Tree {
             let name = dent.file_name().to_string_lossy().into_owned();
             // Reuse the old node if this name survived, keeping its
             // loaded subtree and expansion state.
-            let reused = unused.iter_mut().find(|slot| {
-                slot.map(|i| self.nodes[i].name == name).unwrap_or(false)
-            });
+            let reused = unused
+                .iter_mut()
+                .find(|slot| slot.map(|i| self.nodes[i].name == name).unwrap_or(false));
             if let Some(slot) = reused {
                 kids.push(slot.take().unwrap());
                 continue;
@@ -89,7 +89,9 @@ impl Tree {
             };
             let is_symlink = ft.is_symlink();
             let is_dir = if is_symlink {
-                std::fs::metadata(dent.path()).map(|m| m.is_dir()).unwrap_or(false)
+                std::fs::metadata(dent.path())
+                    .map(|m| m.is_dir())
+                    .unwrap_or(false)
             } else {
                 ft.is_dir()
             };
@@ -109,7 +111,9 @@ impl Tree {
 
         kids.sort_by(|&a, &b| {
             let (na, nb) = (&self.nodes[a], &self.nodes[b]);
-            nb.is_dir.cmp(&na.is_dir).then_with(|| na.name.cmp(&nb.name))
+            nb.is_dir
+                .cmp(&na.is_dir)
+                .then_with(|| na.name.cmp(&nb.name))
         });
 
         let n = &mut self.nodes[id];

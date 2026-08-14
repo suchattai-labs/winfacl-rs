@@ -91,5 +91,38 @@ fi
 "$BIN" --version >/dev/null 2>&1 && ok "--version works" || bad "--version broken"
 
 # ------------------------------------------------------------------
+echo "6. TUI smoke test under a pty"
+smoke() {
+    # $1 = path, $2 = keystrokes, $3 = expected string, $4 = label
+    out=$(printf '%b' "$2" | timeout 20 script -qec \
+        "stty rows 30 cols 110; TERM=xterm $BIN '$1'" /dev/null 2>&1)
+    st=$?
+    if [ $st -ne 0 ]; then
+        bad "$4 (exit $st)"
+        return
+    fi
+    case "$out" in
+    *"$3"*) ok "$4" ;;
+    *)
+        bad "$4 (screen did not render)"
+        printf '%s\n' "$out" | head -3
+        ;;
+    esac
+}
+SD="$TMP/smoke"
+mkdir -p "$SD/sub"
+: > "$SD/file1"
+setfacl -m u:root:rwx -m g:daemon:rx "$SD/file1"
+smoke "$SD/file1" 'q' "Advanced Security Settings" \
+      "file arg opens the classic editor"
+smoke "$SD/file1" '?xq' "winfacl Help" "help screen opens and closes"
+smoke "$SD" 'q' "Filesystem" "directory arg opens the two-panel browser"
+smoke "$SD" 'q' "Advanced Security Settings" \
+      "browser preview shows the editor panel"
+smoke "$SD" '\tqq' "Filesystem" \
+      "Tab enters the editor, q returns to the tree, q quits"
+smoke "$SD" 'jjq' "Filesystem" "tree navigation survives cursor movement"
+
+# ------------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

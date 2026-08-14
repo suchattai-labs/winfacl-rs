@@ -320,15 +320,17 @@ impl Report {
 /// stopping at `limit`.
 pub fn count_tree(path: &Path, limit: usize) -> usize {
     let mut n = 0;
-    for entry in walkdir::WalkDir::new(path).follow_links(false) {
-        if let Ok(ent) = entry {
-            if ent.file_type().is_symlink() {
-                continue;
-            }
-            n += 1;
-            if limit > 0 && n >= limit {
-                break;
-            }
+    for ent in walkdir::WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .flatten()
+    {
+        if ent.file_type().is_symlink() {
+            continue;
+        }
+        n += 1;
+        if limit > 0 && n >= limit {
+            break;
         }
     }
     n

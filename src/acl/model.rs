@@ -48,9 +48,9 @@ impl EntryList {
     }
 
     pub fn find(&self, kind: Kind, tag: Tag, id: u32) -> Option<usize> {
-        self.0.iter().position(|e| {
-            e.kind == kind && e.tag == tag && (!tag.is_named() || e.id == id)
-        })
+        self.0
+            .iter()
+            .position(|e| e.kind == kind && e.tag == tag && (!tag.is_named() || e.id == id))
     }
 
     /// Insert or replace; base tags and (tag,id) pairs are unique per kind.
@@ -78,9 +78,7 @@ impl EntryList {
     /// Canonical POSIX order: access before default; user_obj, users (by
     /// id), group_obj, groups (by id), mask, other.
     pub fn sort_canonical(&mut self) {
-        self.0.sort_by(|a, b| {
-            (a.kind, a.tag, a.id).cmp(&(b.kind, b.tag, b.id))
-        });
+        self.0.sort_by_key(|a| (a.kind, a.tag, a.id));
     }
 
     pub fn count_named(&self, kind: Kind) -> usize {
@@ -142,8 +140,7 @@ mod tests {
         l.set(Kind::Default, Tag::UserObj, 0, P_ALL);
         l.sort_canonical();
 
-        let seq: Vec<(Kind, Tag, u32)> =
-            l.0.iter().map(|e| (e.kind, e.tag, e.id)).collect();
+        let seq: Vec<(Kind, Tag, u32)> = l.0.iter().map(|e| (e.kind, e.tag, e.id)).collect();
         assert_eq!(
             seq,
             vec![
@@ -184,6 +181,7 @@ pub enum MatchKind {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // full evaluation result: the effective dialog reads granted+trace today
 pub struct Effective {
     pub granted: u8,
     pub matched: MatchKind,
@@ -199,10 +197,7 @@ impl EntryList {
     pub fn calc_mask(&self, kind: Kind) -> u8 {
         self.0
             .iter()
-            .filter(|e| {
-                e.kind == kind
-                    && matches!(e.tag, Tag::User | Tag::Group | Tag::GroupObj)
-            })
+            .filter(|e| e.kind == kind && matches!(e.tag, Tag::User | Tag::Group | Tag::GroupObj))
             .fold(0, |m, e| m | e.perms)
             & P_ALL
     }
@@ -224,7 +219,10 @@ impl EntryList {
     }
 
     fn count_tag(&self, kind: Kind, tag: Tag) -> usize {
-        self.0.iter().filter(|e| e.kind == kind && e.tag == tag).count()
+        self.0
+            .iter()
+            .filter(|e| e.kind == kind && e.tag == tag)
+            .count()
     }
 
     /// POSIX validity: base entries present exactly once, at most one
@@ -237,14 +235,8 @@ impl EntryList {
 
         for (i, a) in self.0.iter().enumerate() {
             for b in &self.0[i + 1..] {
-                if a.kind == b.kind
-                    && a.tag == b.tag
-                    && (!a.tag.is_named() || a.id == b.id)
-                {
-                    return Err(format!(
-                        "duplicate {} entry",
-                        kind_name(a.kind)
-                    ));
+                if a.kind == b.kind && a.tag == b.tag && (!a.tag.is_named() || a.id == b.id) {
+                    return Err(format!("duplicate {} entry", kind_name(a.kind)));
                 }
             }
         }
@@ -357,9 +349,11 @@ impl EntryList {
                 ));
             }
         }
-        for e in self.0.iter().filter(|e| {
-            e.kind == Kind::Access && e.tag == Tag::Group && gids.contains(&e.id)
-        }) {
+        for e in self
+            .0
+            .iter()
+            .filter(|e| e.kind == Kind::Access && e.tag == Tag::Group && gids.contains(&e.id))
+        {
             uni |= e.perms;
             matched_any = true;
             names.push(format!(
@@ -509,7 +503,12 @@ mod tests_mask {
 
         // duplicates are impossible via set(); simulate via raw push
         let mut l = base(false);
-        l.0.push(Entry { kind: Kind::Access, tag: Tag::Other, id: 0, perms: P_R });
+        l.0.push(Entry {
+            kind: Kind::Access,
+            tag: Tag::Other,
+            id: 0,
+            perms: P_R,
+        });
         assert!(l.validate(false).is_err());
     }
 
@@ -582,7 +581,11 @@ pub fn format_getfacl(path: &str, owner: u32, group: u32, list: &EntryList) -> S
     let _ = writeln!(out, "# group: {}", super::names::gid_name(group));
 
     for e in &l.0 {
-        let pfx = if e.kind == Kind::Default { "default:" } else { "" };
+        let pfx = if e.kind == Kind::Default {
+            "default:"
+        } else {
+            ""
+        };
         let pb = perm_string(e.perms);
         let body = match e.tag {
             Tag::UserObj => format!("{pfx}user::{pb}"),
@@ -599,7 +602,11 @@ pub fn format_getfacl(path: &str, owner: u32, group: u32, list: &EntryList) -> S
         out.push_str(&body);
         // group-class entries carry the annotation when a mask clips them
         if matches!(e.tag, Tag::User | Tag::Group | Tag::GroupObj) {
-            let mask = if e.kind == Kind::Default { dmask } else { amask };
+            let mask = if e.kind == Kind::Default {
+                dmask
+            } else {
+                amask
+            };
             if let Some(m) = mask {
                 if e.perms & m != e.perms {
                     let _ = write!(out, "\t#effective:{}", perm_string(e.perms & m));
@@ -653,7 +660,10 @@ mod tests_format {
         l.set(Kind::Access, Tag::GroupObj, 0, P_R);
         l.set(Kind::Access, Tag::Other, 0, P_R);
         let out = format_getfacl("x", 0, 0, &l);
-        assert_eq!(out, "# file: x\n# owner: root\n# group: root\nuser::rw-\ngroup::r--\nother::r--\n");
+        assert_eq!(
+            out,
+            "# file: x\n# owner: root\n# group: root\nuser::rw-\ngroup::r--\nother::r--\n"
+        );
     }
 
     #[test]

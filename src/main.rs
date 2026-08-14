@@ -74,7 +74,8 @@ fn main() -> ExitCode {
             eprintln!(
                 "winfacl: {}: {}",
                 path.display(),
-                m.load_errno.map_or_else(|| "I/O error".into(), |e| e.to_string())
+                m.load_errno
+                    .map_or_else(|| "I/O error".into(), |e| e.to_string())
             );
             return ExitCode::FAILURE;
         }

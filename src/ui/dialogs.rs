@@ -66,11 +66,7 @@ pub fn confirm(term: &mut Term, bg: Background, title: &str, body: &str) -> bool
                     format!("[ {label} ]")
                 }
             };
-            let text = format!(
-                "{b}\n\n  {}   {}",
-                btn("Yes", yes),
-                btn("No", !yes)
-            );
+            let text = format!("{b}\n\n  {}   {}", btn("Yes", yes), btn("No", !yes));
             f.render_widget(
                 Paragraph::new(text)
                     .wrap(Wrap { trim: false })
@@ -116,14 +112,16 @@ pub fn pick_principal(term: &mut Term, bg: Background, groups: bool) -> Option<(
         if sel >= shown.len() {
             sel = shown.len().saturating_sub(1);
         }
-        let title = if groups { "Pick a group" } else { "Pick a user" };
+        let title = if groups {
+            "Pick a group"
+        } else {
+            "Pick a user"
+        };
         let f2 = filter.clone();
         let rows: Vec<String> = shown
             .iter()
             .enumerate()
-            .map(|(i, (n, id))| {
-                format!("{} {:<28} {:>8}", if i == sel { ">" } else { " " }, n, id)
-            })
+            .map(|(i, (n, id))| format!("{} {:<28} {:>8}", if i == sel { ">" } else { " " }, n, id))
             .collect();
         draw_over(term, bg, &mut |f| {
             let area = popup_rect(f.area(), 46, 18);
@@ -164,7 +162,12 @@ pub fn pick_principal(term: &mut Term, bg: Background, groups: bool) -> Option<(
 }
 
 /// Add (edit_idx None) or edit an entry. Returns true if staged changed.
-pub fn entry_dialog(term: &mut Term, bg: Background, m: &mut Model, edit_idx: Option<usize>) -> bool {
+pub fn entry_dialog(
+    term: &mut Term,
+    bg: Background,
+    m: &mut Model,
+    edit_idx: Option<usize>,
+) -> bool {
     // Form state
     let mut is_group = false;
     let mut named = true;
@@ -204,7 +207,11 @@ pub fn entry_dialog(term: &mut Term, bg: Background, m: &mut Model, edit_idx: Op
     }
 
     loop {
-        let title = if edit_idx.is_some() { "Edit entry" } else { "Add entry" };
+        let title = if edit_idx.is_some() {
+            "Edit entry"
+        } else {
+            "Add entry"
+        };
         let chk = |on: bool, label: &str, foc: bool| {
             format!(
                 "{}[{}] {label}{}",
@@ -230,7 +237,11 @@ pub fn entry_dialog(term: &mut Term, bg: Background, m: &mut Model, edit_idx: Op
             },
             if focus == 4 { "< (space toggles)" } else { "" },
             if focus == 5 { "[(OK)]" } else { "[ OK ]" },
-            if focus == 6 { "[(Cancel)]" } else { "[ Cancel ]" },
+            if focus == 6 {
+                "[(Cancel)]"
+            } else {
+                "[ Cancel ]"
+            },
             err
         );
         draw_over(term, bg, &mut |f| {
@@ -244,7 +255,9 @@ pub fn entry_dialog(term: &mut Term, bg: Background, m: &mut Model, edit_idx: Op
             );
         });
 
-        let Some(k) = term.next_key() else { return false };
+        let Some(k) = term.next_key() else {
+            return false;
+        };
         match k {
             Key::Resize => continue,
             k => match k.code() {
@@ -261,7 +274,11 @@ pub fn entry_dialog(term: &mut Term, bg: Background, m: &mut Model, edit_idx: Op
                     2 => perms ^= P_W,
                     3 => perms ^= P_X,
                     4 => {
-                        kind = if kind == Kind::Access { Kind::Default } else { Kind::Access };
+                        kind = if kind == Kind::Access {
+                            Kind::Default
+                        } else {
+                            Kind::Access
+                        };
                     }
                     _ => {
                         if focus == 0 && named {
@@ -331,9 +348,8 @@ pub fn effective_dialog(term: &mut Term, bg: Background, m: &Model) {
     let mut user = String::new();
     let mut result = String::new();
     loop {
-        let body = format!(
-            "User: {user}_   (F2 picks a user, Enter evaluates, Esc closes)\n\n{result}"
-        );
+        let body =
+            format!("User: {user}_   (F2 picks a user, Enter evaluates, Esc closes)\n\n{result}");
         draw_over(term, bg, &mut |f| {
             let area = popup_rect(f.area(), 70, 16);
             f.render_widget(Clear, area);
@@ -364,7 +380,9 @@ pub fn effective_dialog(term: &mut Term, bg: Background, m: &Model) {
                         continue;
                     };
                     let gids = names::user_groups(uid);
-                    let eff = m.staged.effective(uid, m.staged_owner, m.staged_group, &gids);
+                    let eff = m
+                        .staged
+                        .effective(uid, m.staged_owner, m.staged_group, &gids);
                     result = format!(
                         "Effective permissions: {}\n\n{}",
                         perm_string(eff.granted),

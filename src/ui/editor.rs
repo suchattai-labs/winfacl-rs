@@ -14,7 +14,15 @@ use ratatui::{
 };
 use std::process::ExitCode;
 
-const BTNS: [&str; 7] = ["Add", "Edit", "Remove", "Effective Access", "Apply", "OK", "Cancel"];
+const BTNS: [&str; 7] = [
+    "Add",
+    "Edit",
+    "Remove",
+    "Effective Access",
+    "Apply",
+    "OK",
+    "Cancel",
+];
 const B_ADD: usize = 0;
 const B_EDIT: usize = 1;
 const B_REMOVE: usize = 2;
@@ -75,14 +83,23 @@ impl EditorState {
             match l.find(Kind::Default, e.tag, e.id) {
                 Some(d) if l.0[d].perms == e.perms => {
                     used[d] = true;
-                    self.rows.push(Row { aidx: Some(i), didx: Some(d) });
+                    self.rows.push(Row {
+                        aidx: Some(i),
+                        didx: Some(d),
+                    });
                 }
-                _ => self.rows.push(Row { aidx: Some(i), didx: None }),
+                _ => self.rows.push(Row {
+                    aidx: Some(i),
+                    didx: None,
+                }),
             }
         }
         for (i, e) in l.0.iter().enumerate() {
             if e.kind == Kind::Default && !used[i] {
-                self.rows.push(Row { aidx: None, didx: Some(i) });
+                self.rows.push(Row {
+                    aidx: None,
+                    didx: Some(i),
+                });
             }
         }
         if self.sel >= self.rows.len() {
@@ -170,7 +187,11 @@ impl EditorState {
         lines.push(Line::styled(
             format!(
                 " Advanced Security Settings{:>w$}",
-                if self.embedded { "q Back " } else { "F1 Help  Esc Cancel " },
+                if self.embedded {
+                    "q Back "
+                } else {
+                    "F1 Help  Esc Cancel "
+                },
                 w = (area.width as usize).saturating_sub(28)
             ),
             title_style,
@@ -251,7 +272,11 @@ impl EditorState {
                     self.principal(m, row),
                     acc,
                     self.applies(m, row),
-                    if row.aidx.is_some() { "None" } else { "Default (this folder)" }
+                    if row.aidx.is_some() {
+                        "None"
+                    } else {
+                        "Default (this folder)"
+                    }
                 )
             };
             let style = if k == self.sel && !self.focus_buttons {
@@ -274,7 +299,11 @@ impl EditorState {
         let mut btns = String::from("  ");
         for (i, b) in BTNS.iter().enumerate() {
             let hot = self.focus_buttons && self.btn == i;
-            btns.push_str(&format!("[{}{b}{}] ", if hot { "(" } else { " " }, if hot { ")" } else { " " }));
+            btns.push_str(&format!(
+                "[{}{b}{}] ",
+                if hot { "(" } else { " " },
+                if hot { ")" } else { " " }
+            ));
             if i == B_EFF {
                 btns.push(' ');
             }
@@ -290,7 +319,11 @@ impl EditorState {
             }
             lines.push(Line::styled(hint, Style::new().dim()));
         } else {
-            let style = if self.status_error { banner } else { Style::default() };
+            let style = if self.status_error {
+                banner
+            } else {
+                Style::default()
+            };
             lines.push(Line::styled(format!("  {}", self.status), style));
         }
 
@@ -331,7 +364,12 @@ impl EditorState {
             return;
         }
         let prin = self.principal(m, &row);
-        if !dialogs::confirm(term, bg, "Remove entry", &format!("Remove the entry for {prin}?")) {
+        if !dialogs::confirm(
+            term,
+            bg,
+            "Remove entry",
+            &format!("Remove the entry for {prin}?"),
+        ) {
             return;
         }
         let (mut i1, i2) = match (row.aidx, row.didx) {
@@ -368,7 +406,12 @@ impl EditorState {
             return false;
         }
         if let Err(e) = m.staged.validate(m.is_dir) {
-            dialogs::msgbox(term, bg, "Cannot apply", &format!("The ACL is not valid:\n\n{e}"));
+            dialogs::msgbox(
+                term,
+                bg,
+                "Cannot apply",
+                &format!("The ACL is not valid:\n\n{e}"),
+            );
             return false;
         }
         if m.recursive && m.is_dir {
@@ -452,7 +495,11 @@ impl EditorState {
             }
             B_OK => {
                 if !m.dirty() || self.action_apply(term, bg, m) {
-                    return if self.embedded { EditorEvent::Back } else { EditorEvent::Quit };
+                    return if self.embedded {
+                        EditorEvent::Back
+                    } else {
+                        EditorEvent::Quit
+                    };
                 }
             }
             B_CANCEL => return self.action_quit(term, bg, m),
@@ -632,7 +679,9 @@ pub fn run(mut m: Model) -> ExitCode {
             let area = f.area();
             ed.render(f, area, &m, true);
         });
-        let Some(k) = term.next_key() else { return ExitCode::SUCCESS };
+        let Some(k) = term.next_key() else {
+            return ExitCode::SUCCESS;
+        };
 
         // Dialogs opened while handling this key repaint a snapshot of
         // the frame we just drew beneath themselves.

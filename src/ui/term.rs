@@ -41,9 +41,12 @@ impl Term {
     pub fn next_key(&mut self) -> Option<Key> {
         loop {
             match event::read() {
-                Ok(Event::Key(KeyEvent { code, modifiers, kind, .. }))
-                    if kind != KeyEventKind::Release =>
-                {
+                Ok(Event::Key(KeyEvent {
+                    code,
+                    modifiers,
+                    kind,
+                    ..
+                })) if kind != KeyEventKind::Release => {
                     return Some(Key::Press(code, modifiers));
                 }
                 Ok(Event::Resize(..)) => return Some(Key::Resize),
@@ -67,10 +70,6 @@ pub enum Key {
 }
 
 impl Key {
-    pub fn ch(c: char) -> Key {
-        Key::Press(KeyCode::Char(c), KeyModifiers::NONE)
-    }
-
     pub fn is_char(&self, c: char) -> bool {
         matches!(self, Key::Press(KeyCode::Char(x), m)
                  if *x == c && !m.contains(KeyModifiers::CONTROL))

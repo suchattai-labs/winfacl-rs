@@ -27,7 +27,7 @@ fn attr_name(kind: Kind) -> &'static str {
 
 /// Decode the xattr blob into entries of `kind`.
 pub fn decode(blob: &[u8], kind: Kind) -> Result<Vec<Entry>, Errno> {
-    if blob.len() < 4 || (blob.len() - 4) % 8 != 0 {
+    if blob.len() < 4 || !(blob.len() - 4).is_multiple_of(8) {
         return Err(Errno::INVAL);
     }
     let version = u32::from_le_bytes(blob[0..4].try_into().unwrap());
