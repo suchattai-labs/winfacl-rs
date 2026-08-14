@@ -561,3 +561,132 @@ mod tests_mask {
         assert!(!e.mask_applied);
     }
 }
+
+// ---- getfacl-format rendering (task 4) ----
+
+/// Render entries in getfacl(1) text form: `# file:` header block, then
+/// canonical-order entries with `\t#effective:` annotations wherever the
+/// mask clips a group-class entry.
+pub fn format_getfacl(path: &str, owner: u32, group: u32, list: &EntryList) -> String {
+    use std::fmt::Write;
+
+    let mut l = list.clone();
+    l.sort_canonical();
+
+    let amask = l.find(Kind::Access, Tag::Mask, 0).map(|i| l.0[i].perms);
+    let dmask = l.find(Kind::Default, Tag::Mask, 0).map(|i| l.0[i].perms);
+
+    let mut out = String::new();
+    let _ = writeln!(out, "# file: {}", path.strip_prefix('/').unwrap_or(path));
+    let _ = writeln!(out, "# owner: {}", super::names::uid_name(owner));
+    let _ = writeln!(out, "# group: {}", super::names::gid_name(group));
+
+    for e in &l.0 {
+        let pfx = if e.kind == Kind::Default { "default:" } else { "" };
+        let pb = perm_string(e.perms);
+        let body = match e.tag {
+            Tag::UserObj => format!("{pfx}user::{pb}"),
+            Tag::User => {
+                format!("{pfx}user:{}:{pb}", super::names::uid_name(e.id))
+            }
+            Tag::GroupObj => format!("{pfx}group::{pb}"),
+            Tag::Group => {
+                format!("{pfx}group:{}:{pb}", super::names::gid_name(e.id))
+            }
+            Tag::Mask => format!("{pfx}mask::{pb}"),
+            Tag::Other => format!("{pfx}other::{pb}"),
+        };
+        out.push_str(&body);
+        // group-class entries carry the annotation when a mask clips them
+        if matches!(e.tag, Tag::User | Tag::Group | Tag::GroupObj) {
+            let mask = if e.kind == Kind::Default { dmask } else { amask };
+            if let Some(m) = mask {
+                if e.perms & m != e.perms {
+                    let _ = write!(out, "\t#effective:{}", perm_string(e.perms & m));
+                }
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests_format {
+    use super::*;
+
+    #[test]
+    fn perm_strings() {
+        assert_eq!(perm_string(P_ALL), "rwx");
+        assert_eq!(perm_string(P_R | P_X), "r-x");
+        assert_eq!(perm_string(0), "---");
+    }
+
+    #[test]
+    fn getfacl_format_matches_reference() {
+        let mut l = EntryList::new();
+        l.set(Kind::Access, Tag::UserObj, 0, P_R | P_W);
+        l.set(Kind::Access, Tag::User, 0, P_ALL); // root
+        l.set(Kind::Access, Tag::GroupObj, 0, P_R | P_W);
+        l.set(Kind::Access, Tag::Mask, 0, P_R);
+        l.set(Kind::Access, Tag::Other, 0, P_R);
+
+        // getfacl strips the leading slash in the header
+        let out = format_getfacl("/tmp/x", 0, 0, &l);
+        assert_eq!(
+            out,
+            "# file: tmp/x\n\
+             # owner: root\n\
+             # group: root\n\
+             user::rw-\n\
+             user:root:rwx\t#effective:r--\n\
+             group::rw-\t#effective:r--\n\
+             mask::r--\n\
+             other::r--\n"
+        );
+    }
+
+    #[test]
+    fn getfacl_format_no_mask_no_annotation() {
+        let mut l = EntryList::new();
+        l.set(Kind::Access, Tag::UserObj, 0, P_R | P_W);
+        l.set(Kind::Access, Tag::GroupObj, 0, P_R);
+        l.set(Kind::Access, Tag::Other, 0, P_R);
+        let out = format_getfacl("x", 0, 0, &l);
+        assert_eq!(out, "# file: x\n# owner: root\n# group: root\nuser::rw-\ngroup::r--\nother::r--\n");
+    }
+
+    #[test]
+    fn getfacl_format_default_entries_prefixed() {
+        let mut l = EntryList::new();
+        l.set(Kind::Access, Tag::UserObj, 0, P_ALL);
+        l.set(Kind::Access, Tag::GroupObj, 0, P_R);
+        l.set(Kind::Access, Tag::Other, 0, P_R);
+        l.set(Kind::Default, Tag::UserObj, 0, P_ALL);
+        l.set(Kind::Default, Tag::User, 0, P_ALL);
+        l.set(Kind::Default, Tag::GroupObj, 0, P_R);
+        l.set(Kind::Default, Tag::Mask, 0, P_ALL);
+        l.set(Kind::Default, Tag::Other, 0, 0);
+        let out = format_getfacl("d", 0, 0, &l);
+        assert!(out.contains("default:user::rwx\n"));
+        assert!(out.contains("default:user:root:rwx\n"));
+        assert!(out.contains("default:mask::rwx\n"));
+        assert!(out.contains("default:other::---\n"));
+        // mask rwx clips nothing: no annotations anywhere
+        assert!(!out.contains("#effective"));
+    }
+
+    #[test]
+    fn getfacl_format_orphan_ids_print_numbers() {
+        let mut l = EntryList::new();
+        l.set(Kind::Access, Tag::UserObj, 0, P_ALL);
+        l.set(Kind::Access, Tag::User, 4242424, P_R);
+        l.set(Kind::Access, Tag::GroupObj, 0, P_R);
+        l.set(Kind::Access, Tag::Mask, 0, P_ALL);
+        l.set(Kind::Access, Tag::Other, 0, P_R);
+        let out = format_getfacl("x", 4242424, 4242425, &l);
+        assert!(out.contains("# owner: 4242424\n"));
+        assert!(out.contains("# group: 4242425\n"));
+        assert!(out.contains("user:4242424:r--\n"));
+    }
+}
