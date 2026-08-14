@@ -1,3 +1,5 @@
+mod acl;
+
 fn main() {
-    println!("Hello, world!");
+    println!("winfacl-rs: work in progress");
 }
