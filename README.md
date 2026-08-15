@@ -28,8 +28,16 @@ winfacl -d /srv/share       # dump in getfacl(1) form (script-friendly)
 
 ## Install
 
-Grab a static binary from the releases page (`winfacl-linux-x86_64` or
-`winfacl-linux-aarch64`), `chmod +x`, done. Or build from source:
+One-liner (detects your architecture, fetches the latest release):
+
+```
+curl -fsSL https://raw.githubusercontent.com/suchattai-labs/winfacl-rs/master/install.sh | sh
+```
+
+Installs to `/usr/local/bin` when writable, else `~/.local/bin`
+(override with `PREFIX=...`). Or grab a static binary from the releases
+page (`winfacl-linux-x86_64` / `winfacl-linux-aarch64`) yourself, or
+build from source:
 
 ```
 cargo build --release
@@ -38,6 +46,10 @@ cargo build --release --target x86_64-unknown-linux-musl
 ```
 
 ## Keys
+
+The whole interface is mouse-aware: click to select tree nodes and
+permission rows, click buttons, double-click to expand a directory or
+edit an entry, scroll with the wheel.
 
 Browser: `j/k`/arrows move · `→`/`Enter` expand · `←` collapse/up ·
 `r` re-read dir · `Tab`/`e` edit · `q` quit.

@@ -44,8 +44,10 @@ pub fn msgbox(term: &mut Term, bg: Background, title: &str, body: &str) {
             );
         });
         match term.next_key() {
-            None | Some(Key::Press(..)) => return,
-            Some(Key::Resize) => continue,
+            None | Some(Key::Press(..)) | Some(Key::Click(..)) | Some(Key::DoubleClick(..)) => {
+                return
+            }
+            Some(Key::Resize) | Some(Key::Scroll(_)) => continue,
         }
     }
 }
@@ -55,9 +57,11 @@ pub fn confirm(term: &mut Term, bg: Background, title: &str, body: &str) -> bool
     let mut yes = false;
     loop {
         let (t, b) = (title.to_string(), body.to_string());
+        let mut drawn = ratatui::layout::Rect::default();
         draw_over(term, bg, &mut |f| {
             let lines = b.lines().count() as u16;
             let area = popup_rect(f.area(), 60, lines + 5);
+            drawn = area;
             f.render_widget(Clear, area);
             let btn = |label: &str, focused: bool| {
                 if focused {
@@ -76,7 +80,22 @@ pub fn confirm(term: &mut Term, bg: Background, title: &str, body: &str) -> bool
         });
         match term.next_key() {
             None => return false,
-            Some(Key::Resize) => continue,
+            Some(Key::Resize) | Some(Key::Scroll(_)) => continue,
+            Some(k @ (Key::Click(..) | Key::DoubleClick(..))) => {
+                let (x, y) = k.pos().unwrap();
+                // The button row sits below the body, inside the border:
+                // "  [(Yes)]   [ No ]" -- both buttons are 7 cells wide.
+                let brow = drawn.y + 1 + body.lines().count() as u16 + 1;
+                if y == brow {
+                    let x0 = drawn.x + 3;
+                    if x >= x0 && x < x0 + 7 {
+                        return true;
+                    }
+                    if x >= x0 + 10 && x < x0 + 17 {
+                        return false;
+                    }
+                }
+            }
             Some(k) => match k.code() {
                 Some(KeyCode::Left | KeyCode::Right | KeyCode::Tab) => yes = !yes,
                 Some(KeyCode::Enter) => return yes,
@@ -123,8 +142,10 @@ pub fn pick_principal(term: &mut Term, bg: Background, groups: bool) -> Option<(
             .enumerate()
             .map(|(i, (n, id))| format!("{} {:<28} {:>8}", if i == sel { ">" } else { " " }, n, id))
             .collect();
+        let mut drawn = ratatui::layout::Rect::default();
         draw_over(term, bg, &mut |f| {
             let area = popup_rect(f.area(), 46, 18);
+            drawn = area;
             f.render_widget(Clear, area);
             let mut text = format!("Filter: {f2}_\n\n");
             let h = area.height.saturating_sub(5) as usize;
@@ -137,6 +158,27 @@ pub fn pick_principal(term: &mut Term, bg: Background, groups: bool) -> Option<(
         });
         match term.next_key()? {
             Key::Resize => continue,
+            Key::Scroll(d) => {
+                sel = sel
+                    .saturating_add_signed(d as isize)
+                    .min(shown.len().saturating_sub(1));
+            }
+            k @ (Key::Click(..) | Key::DoubleClick(..)) => {
+                let (_, y) = k.pos().unwrap();
+                // rows start below the border, filter line and blank line
+                let rows_y = drawn.y + 3;
+                let h = drawn.height.saturating_sub(5) as usize;
+                let top = sel.saturating_sub(h.saturating_sub(1));
+                if y >= rows_y && ((y - rows_y) as usize) < h {
+                    let idx = top + (y - rows_y) as usize;
+                    if idx < shown.len() {
+                        sel = idx;
+                        if matches!(k, Key::DoubleClick(..)) {
+                            return shown.get(sel).map(|&(n, id)| (n.clone(), *id));
+                        }
+                    }
+                }
+            }
             k => match k.code() {
                 Some(KeyCode::Esc) => return None,
                 Some(KeyCode::Enter) => {
@@ -259,7 +301,7 @@ pub fn entry_dialog(
             return false;
         };
         match k {
-            Key::Resize => continue,
+            Key::Resize | Key::Click(..) | Key::DoubleClick(..) | Key::Scroll(_) => continue,
             k => match k.code() {
                 Some(KeyCode::Esc) => return false,
                 Some(KeyCode::Tab) | Some(KeyCode::Down) => focus = (focus + 1) % 7,
@@ -362,7 +404,7 @@ pub fn effective_dialog(term: &mut Term, bg: Background, m: &Model) {
         });
         let Some(k) = term.next_key() else { return };
         match k {
-            Key::Resize => continue,
+            Key::Resize | Key::Click(..) | Key::DoubleClick(..) | Key::Scroll(_) => continue,
             k => match k.code() {
                 Some(KeyCode::Esc) => return,
                 Some(KeyCode::F(2)) => {

@@ -122,6 +122,10 @@ smoke "$SD" 'q' "Advanced Security Settings" \
 smoke "$SD" '\tqq' "Filesystem" \
       "Tab enters the editor, q returns to the tree, q quits"
 smoke "$SD" 'jjq' "Filesystem" "tree navigation survives cursor movement"
+smoke "$SD" '\033[<0;5;3M\033[<0;5;3mq' "Filesystem" \
+      "mouse click in the tree is handled"
+smoke "$SD" '\033[<64;5;3M\033[<65;5;3Mq' "Filesystem" \
+      "scroll wheel is handled"
 
 # ------------------------------------------------------------------
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

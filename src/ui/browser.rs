@@ -24,6 +24,8 @@ struct Browser {
     model_path: PathBuf,
     model_err: String,
     editor: EditorState,
+    geo_tree: Rect,
+    geo_ed: Rect,
 }
 
 impl Browser {
@@ -115,9 +117,9 @@ impl Browser {
             let depth = self.tree.depth(id).min(w.saturating_sub(8) / 2);
             let marker = if n.is_dir {
                 if n.expanded {
-                    "v"
+                    "\u{25be}" // ▾
                 } else {
-                    ">"
+                    "\u{25b8}" // ▸
                 }
             } else {
                 " "
@@ -134,6 +136,10 @@ impl Browser {
             let body: String = body.chars().take(w).collect();
             let style = if k == self.sel {
                 selected
+            } else if self.tree.node(id).is_dir {
+                Style::new().bold()
+            } else if self.tree.node(id).load_failed {
+                Style::new().fg(Color::Red)
             } else {
                 Style::default()
             };
@@ -173,6 +179,8 @@ impl Browser {
             ..below
         };
 
+        self.geo_tree = tree_area;
+        self.geo_ed = ed_area;
         let tl = self.tree_lines(tree_area);
         f.render_widget(Paragraph::new(tl), tree_area);
 
@@ -244,6 +252,30 @@ impl Browser {
         self.load_selection();
     }
 
+    /// The tree row under (x, y), if any (row 0 of the panel is the
+    /// "Filesystem" header).
+    fn hit_tree_row(&self, x: u16, y: u16) -> Option<usize> {
+        use super::term::rect_contains;
+        if !rect_contains(self.geo_tree, x, y) || y == self.geo_tree.y {
+            return None;
+        }
+        let idx = self.top + (y - self.geo_tree.y - 1) as usize;
+        (idx < self.flat.len()).then_some(idx)
+    }
+
+    fn select_abs(&mut self, term: &mut Term, idx: usize) -> bool {
+        if idx == self.sel {
+            return true;
+        }
+        let mut bg = self.snapshot(term);
+        if !self.may_leave(term, &mut bg) {
+            return false;
+        }
+        self.sel = idx;
+        self.load_selection();
+        true
+    }
+
     fn expand_sel(&mut self) {
         let Some(&id) = self.flat.get(self.sel) else {
             return;
@@ -276,19 +308,31 @@ impl Browser {
     }
 
     /// Hand the keyboard to the embedded editor until it comes back.
-    fn enter_editor(&mut self, term: &mut Term) -> bool {
+    /// `initial` forwards the event that entered the editor (a click).
+    fn enter_editor(&mut self, term: &mut Term, initial: Option<Key>) -> bool {
         if self.model.is_none() {
             return true;
         }
         self.focus_editor = true;
+        let mut pending = initial;
         loop {
             let _ = term.terminal.draw(|f| self.render(f));
-            let Some(k) = term.next_key() else {
+            let Some(k) = pending.take().or_else(|| term.next_key()) else {
                 self.focus_editor = false;
                 return false; // EOF: quit the browser too
             };
             if k == Key::Resize {
                 continue;
+            }
+            // A click back in the tree panel leaves the editor.
+            if let Some((x, y)) = k.pos() {
+                if super::term::rect_contains(self.geo_tree, x, y) {
+                    self.focus_editor = false;
+                    if let Some(idx) = self.hit_tree_row(x, y) {
+                        self.select_abs(term, idx);
+                    }
+                    return true;
+                }
             }
             let mut bg = self.snapshot(term);
             let mut m = self.model.take().unwrap();
@@ -336,6 +380,8 @@ pub fn run(root: &Path, follow: bool) -> ExitCode {
         model_path: PathBuf::new(),
         model_err: String::new(),
         editor: EditorState::new(true),
+        geo_tree: Rect::default(),
+        geo_ed: Rect::default(),
     };
     b.load_selection();
 
@@ -346,6 +392,36 @@ pub fn run(root: &Path, follow: bool) -> ExitCode {
         };
         let code = match k {
             Key::Resize => continue,
+            Key::Scroll(d) => {
+                b.move_sel(&mut term, d as isize);
+                continue;
+            }
+            Key::Click(x, y) | Key::DoubleClick(x, y) => {
+                if let Some(idx) = b.hit_tree_row(x, y) {
+                    if !b.select_abs(&mut term, idx) {
+                        continue;
+                    }
+                    if matches!(k, Key::DoubleClick(..)) {
+                        let id = b.flat[b.sel];
+                        if b.tree.node(id).is_dir {
+                            if b.tree.node(id).expanded {
+                                b.tree.collapse(id);
+                            } else {
+                                b.expand_sel();
+                                continue;
+                            }
+                            b.reflatten();
+                        } else if !b.enter_editor(&mut term, None) {
+                            return ExitCode::SUCCESS;
+                        }
+                    }
+                } else if super::term::rect_contains(b.geo_ed, x, y)
+                    && !b.enter_editor(&mut term, Some(k))
+                {
+                    return ExitCode::SUCCESS;
+                }
+                continue;
+            }
             Key::Press(c, _) => c,
         };
         match code {
@@ -368,12 +444,12 @@ pub fn run(root: &Path, follow: bool) -> ExitCode {
                     } else {
                         b.expand_sel();
                     }
-                } else if !b.enter_editor(&mut term) {
+                } else if !b.enter_editor(&mut term, None) {
                     return ExitCode::SUCCESS;
                 }
             }
             KeyCode::Tab | KeyCode::Char('e') => {
-                if !b.enter_editor(&mut term) {
+                if !b.enter_editor(&mut term, None) {
                     return ExitCode::SUCCESS;
                 }
             }

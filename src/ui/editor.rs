@@ -56,6 +56,12 @@ pub struct EditorState {
     status: String,
     status_error: bool,
     pub embedded: bool,
+    // geometry of the last render, for mouse hit-testing
+    geo_area: Rect,
+    geo_list_y: u16,
+    geo_list_h: u16,
+    geo_btn_y: u16,
+    geo_btns: Vec<(u16, u16)>, // per-button [start, end) x
 }
 
 impl EditorState {
@@ -69,6 +75,11 @@ impl EditorState {
             status: String::new(),
             status_error: false,
             embedded,
+            geo_area: Rect::default(),
+            geo_list_y: 0,
+            geo_list_h: 0,
+            geo_btn_y: 0,
+            geo_btns: Vec::new(),
         }
     }
 
@@ -172,50 +183,70 @@ impl EditorState {
     }
 
     /// The editor screen as owned lines -- also used to snapshot the
-    /// background that dialogs repaint beneath themselves.
+    /// background that dialogs repaint beneath themselves. Records click
+    /// geometry as a side effect.
     pub fn lines(&mut self, area: Rect, m: &Model, active: bool) -> Vec<Line<'static>> {
         let title_style = Style::new().bold().fg(Color::White).bg(Color::Blue);
         let banner = Style::new().bold().fg(Color::Yellow).bg(Color::Red);
         let header = Style::new().bold().fg(Color::Black).bg(Color::Gray);
+        let label = Style::new().dim();
         let selected = if active {
             Style::new().bold().fg(Color::Black).bg(Color::Cyan)
         } else {
             header
         };
+        let w = area.width as usize;
 
+        self.geo_area = area;
         let mut lines: Vec<Line> = Vec::new();
+
+        let hint = if self.embedded {
+            "q Back "
+        } else {
+            "F1 Help  Esc Cancel "
+        };
         lines.push(Line::styled(
             format!(
-                " Advanced Security Settings{:>w$}",
-                if self.embedded {
-                    "q Back "
-                } else {
-                    "F1 Help  Esc Cancel "
-                },
-                w = (area.width as usize).saturating_sub(28)
+                " Advanced Security Settings{hint:>w$}",
+                w = w.saturating_sub(28)
             ),
             title_style,
         ));
         lines.push(Line::raw(""));
-        lines.push(Line::raw(format!("  Name:   {}", m.path.display())));
-        lines.push(Line::raw(format!(
-            "  Owner:  {} (uid {})      Group: {} (gid {})",
-            names::uid_name(m.staged_owner),
-            m.staged_owner,
-            names::gid_name(m.staged_group),
-            m.staged_group
-        )));
-        lines.push(Line::raw(format!(
-            "  Type:   {}{}   Mode: {:04o}   Auto-mask: {}",
-            if m.is_dir { "Directory" } else { "File" },
-            match (&m.is_symlink, &m.target) {
-                (true, Some(t)) => format!(" (via symlink -> {})", t.display()),
-                (true, None) => " (via symlink)".into(),
-                _ => String::new(),
-            },
-            m.mode,
-            if m.auto_mask { "on" } else { "off" }
-        )));
+        lines.push(Line::from(vec![
+            Span::styled("  Name    ", label),
+            Span::raw(m.path.display().to_string()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  Owner   ", label),
+            Span::raw(format!(
+                "{} (uid {})",
+                names::uid_name(m.staged_owner),
+                m.staged_owner
+            )),
+            Span::styled("   Group  ", label),
+            Span::raw(format!(
+                "{} (gid {})",
+                names::gid_name(m.staged_group),
+                m.staged_group
+            )),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  Type    ", label),
+            Span::raw(format!(
+                "{}{}",
+                if m.is_dir { "Directory" } else { "File" },
+                match (&m.is_symlink, &m.target) {
+                    (true, Some(t)) => format!(" (via symlink -> {})", t.display()),
+                    (true, None) => " (via symlink)".into(),
+                    _ => String::new(),
+                }
+            )),
+            Span::styled("   Mode   ", label),
+            Span::raw(format!("{:04o}", m.mode)),
+            Span::styled("   Auto-mask  ", label),
+            Span::raw(if m.auto_mask { "on" } else { "off" }),
+        ]));
 
         if !m.acl_supported {
             lines.push(Line::styled(
@@ -230,8 +261,7 @@ impl EditorState {
             ));
         }
 
-        lines.push(Line::raw("  Permission entries:"));
-        let w = area.width as usize;
+        lines.push(Line::raw(""));
         let narrow = w < 76;
         let head = if narrow {
             format!("  {:<6}{:<26}{:<20}", "Type", "Principal", "Access")
@@ -243,8 +273,10 @@ impl EditorState {
         };
         lines.push(Line::styled(format!("{head:<w$}"), header));
 
-        let fixed = lines.len() + 3; // header block + separator + buttons + status
+        self.geo_list_y = area.y + lines.len() as u16;
+        let fixed = lines.len() + 3; // separator + buttons + status
         let list_h = (area.height as usize).saturating_sub(fixed).max(3);
+        self.geo_list_h = list_h as u16;
         if self.sel < self.top {
             self.top = self.sel;
         }
@@ -283,6 +315,8 @@ impl EditorState {
                 selected
             } else if k == self.sel {
                 header
+            } else if e.tag == Tag::Mask {
+                Style::new().dim()
             } else {
                 Style::default()
             };
@@ -295,29 +329,43 @@ impl EditorState {
             lines.push(Line::raw(""));
         }
 
-        lines.push(Line::raw(format!("{:-<w$}", "")));
-        let mut btns = String::from("  ");
+        lines.push(Line::styled("\u{2500}".repeat(w), Style::new().dim()));
+
+        // Button bar: record each button's x-range for clicks.
+        self.geo_btn_y = area.y + lines.len() as u16;
+        self.geo_btns.clear();
+        let mut spans: Vec<Span> = vec![Span::raw("  ")];
+        let mut x = area.x + 2;
+        let btn_style = Style::new().fg(Color::Black).bg(Color::Gray);
+        let btn_focus = Style::new().bold().fg(Color::White).bg(Color::Blue);
         for (i, b) in BTNS.iter().enumerate() {
             let hot = self.focus_buttons && self.btn == i;
-            btns.push_str(&format!(
-                "[{}{b}{}] ",
-                if hot { "(" } else { " " },
-                if hot { ")" } else { " " }
-            ));
+            let text = format!(" {b} ");
+            let bw = text.chars().count() as u16;
+            self.geo_btns.push((x, x + bw));
+            spans.push(Span::styled(text, if hot { btn_focus } else { btn_style }));
+            spans.push(Span::raw(" "));
+            x += bw + 1;
             if i == B_EFF {
-                btns.push(' ');
+                spans.push(Span::raw("  "));
+                x += 2;
             }
         }
-        lines.push(Line::raw(btns));
+        lines.push(Line::from(spans));
 
         if self.status.is_empty() {
             let mut hint = String::from(
                 "  a Add  e Edit  r Remove  f Effective  s Apply  o OK  d Copy->default  m Mask  ? Help",
             );
             if m.dirty() {
-                hint.push_str("   [MODIFIED]");
+                hint.push_str("   ");
+                lines.push(Line::from(vec![
+                    Span::styled(hint, Style::new().dim()),
+                    Span::styled(" MODIFIED ", banner),
+                ]));
+            } else {
+                lines.push(Line::styled(hint, Style::new().dim()));
             }
-            lines.push(Line::styled(hint, Style::new().dim()));
         } else {
             let style = if self.status_error {
                 banner
@@ -328,6 +376,30 @@ impl EditorState {
         }
 
         lines
+    }
+
+    /// The list row under (x, y), if any.
+    fn hit_row(&self, x: u16, y: u16) -> Option<usize> {
+        use super::term::rect_contains;
+        let list = Rect {
+            x: self.geo_area.x,
+            y: self.geo_list_y,
+            width: self.geo_area.width,
+            height: self.geo_list_h,
+        };
+        if !rect_contains(list, x, y) {
+            return None;
+        }
+        let k = self.top + (y - self.geo_list_y) as usize;
+        (k < self.rows.len()).then_some(k)
+    }
+
+    /// The button under (x, y), if any.
+    fn hit_button(&self, x: u16, y: u16) -> Option<usize> {
+        if y != self.geo_btn_y {
+            return None;
+        }
+        self.geo_btns.iter().position(|&(s, e)| x >= s && x < e)
     }
 
     fn writable(&mut self, term: &mut Term, bg: dialogs::Background, m: &Model) -> bool {
@@ -519,6 +591,28 @@ impl EditorState {
         self.status.clear();
         let code = match k {
             Key::Resize => return EditorEvent::Continue,
+            Key::Scroll(d) => {
+                self.sel = self
+                    .sel
+                    .saturating_add_signed(d as isize)
+                    .min(self.rows.len().saturating_sub(1));
+                self.focus_buttons = false;
+                return EditorEvent::Continue;
+            }
+            Key::Click(x, y) | Key::DoubleClick(x, y) => {
+                if let Some(row) = self.hit_row(x, y) {
+                    self.sel = row;
+                    self.focus_buttons = false;
+                    if matches!(k, Key::DoubleClick(..)) {
+                        return self.button(B_EDIT, term, bg, m);
+                    }
+                } else if let Some(b) = self.hit_button(x, y) {
+                    self.focus_buttons = true;
+                    self.btn = b;
+                    return self.button(b, term, bg, m);
+                }
+                return EditorEvent::Continue;
+            }
             Key::Press(c, _) => c,
         };
         match code {
@@ -693,5 +787,62 @@ pub fn run(mut m: Model) -> ExitCode {
             EditorEvent::Continue => {}
             EditorEvent::Back | EditorEvent::Quit => return ExitCode::SUCCESS,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn geo_editor() -> EditorState {
+        let mut ed = EditorState::new(false);
+        ed.geo_area = Rect {
+            x: 40,
+            y: 1,
+            width: 60,
+            height: 28,
+        };
+        ed.geo_list_y = 9;
+        ed.geo_list_h = 10;
+        ed.geo_btn_y = 26;
+        ed.geo_btns = vec![(42, 47), (48, 54), (55, 63)];
+        ed.rows = vec![
+            Row {
+                aidx: Some(0),
+                didx: None,
+            },
+            Row {
+                aidx: Some(1),
+                didx: None,
+            },
+            Row {
+                aidx: Some(2),
+                didx: None,
+            },
+        ];
+        ed
+    }
+
+    #[test]
+    fn hit_row_maps_click_to_scrolled_index() {
+        let mut ed = geo_editor();
+        assert_eq!(ed.hit_row(41, 9), Some(0));
+        assert_eq!(ed.hit_row(41, 11), Some(2));
+        assert_eq!(ed.hit_row(41, 12), None); // below the last row
+        assert_eq!(ed.hit_row(41, 8), None); // header line
+        assert_eq!(ed.hit_row(39, 9), None); // left of the panel
+        ed.top = 1;
+        assert_eq!(ed.hit_row(41, 9), Some(1)); // scrolled by one
+    }
+
+    #[test]
+    fn hit_button_maps_x_ranges() {
+        let ed = geo_editor();
+        assert_eq!(ed.hit_button(42, 26), Some(0));
+        assert_eq!(ed.hit_button(46, 26), Some(0));
+        assert_eq!(ed.hit_button(47, 26), None); // gap between buttons
+        assert_eq!(ed.hit_button(50, 26), Some(1));
+        assert_eq!(ed.hit_button(58, 26), Some(2));
+        assert_eq!(ed.hit_button(50, 25), None); // wrong row
     }
 }

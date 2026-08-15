@@ -1,6 +1,6 @@
 [package]
 name = "winfacl"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 description = "Two-panel POSIX ACL manager in the style of Windows Advanced Security Settings / SetACL Studio"
 license = "MIT"
